@@ -1,0 +1,9 @@
+#data
+data/
+
+#python
+__pycache__
+.pytest_cache
+
+#IDE
+.vscode/
