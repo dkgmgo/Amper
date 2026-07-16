@@ -75,6 +75,7 @@ class GammaMixture:
         self.weights_ = np.zeros(self.n_components)
         self.alphas_ = np.zeros(self.n_components)
         self.betas_ = np.zeros(self.n_components)
+        self.means_ = np.zeros(self.n_components)
 
         for i in range(self.n_components):
             cluster_data = X[labels == i]
