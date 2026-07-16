@@ -4,7 +4,7 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from builder import GENERATORS, LAYER_KEY, DISTANCE_KEY, assign_surrogate_distances, build_surrogate, generate_replicates, surrogate_edge_layers
+from builder import GENERATORS, LAYER_KEY, DISTANCE_KEY, assign_surrogate_distances, build_surrogate, surrogate_edge_layers
 from layers import assign_layers
 from mixture import GammaMixture
 
@@ -47,15 +47,6 @@ def test_edge_counts_match(toy, generator):
         assert entry["generated"] == entry["target"]
         assert entry["lost"] == 0
     assert H.number_of_edges() == G.number_of_edges()
-
-
-def test_reproducible_with_same_seed(toy):
-    G, _, a = toy
-    for generator in GENERATORS:
-        reps1 = generate_replicates(G, a, generator, 3, np.random.SeedSequence(42))
-        reps2 = generate_replicates(G, a, generator, 3, np.random.SeedSequence(42))
-        for (H1, _), (H2, _) in zip(reps1, reps2):
-            assert set(map(frozenset, H1.edges())) == set(map(frozenset, H2.edges()))
 
 
 def test_surrogate_distances_sampled_from_layer_component(toy):

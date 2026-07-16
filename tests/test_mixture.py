@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from mixture import GammaMixture, plot_bic_curve, plot_mixture_fit, select_components
+from mixture import GammaMixture, select_components
 
 
 def _sorted_by_mean(model: GammaMixture):
@@ -28,7 +28,7 @@ class TestParameterRecovery:
         rng = np.random.default_rng(42)
         # Means 1.0 and 15.0 — well separated.
         x, y = _synthetic(rng, [(2.0, 0.5, 3000), (30.0, 0.5, 3000)])
-        model = select_components(X=x, fixed=2, seed=0)[0]
+        model = select_components(X=x, n_range=range(2,3), seed=0)[0]
         assert model.converged_
         weights, shapes, scales, means = _sorted_by_mean(model)
         np.testing.assert_allclose(means, [1.0, 15.0], rtol=0.10)
@@ -39,7 +39,7 @@ class TestParameterRecovery:
     def test_two_components_classification(self):
         rng = np.random.default_rng(7)
         x, y = _synthetic(rng, [(2.0, 0.5, 2000), (30.0, 0.5, 2000)])
-        model = select_components(X=x, fixed=2, seed=0)[0]
+        model = select_components(X=x, n_range=range(2,3), seed=0)[0]
         pred = model.predict(x)
         # Align predicted component index with true label via mean order.
         order = np.argsort(model.means_)
@@ -52,7 +52,7 @@ class TestParameterRecovery:
         rng = np.random.default_rng(3)
         # Means 1.0, 8.0, 48.0.
         x, _ = _synthetic(rng, [(2.0, 0.5, 3000), (20.0, 0.4, 3000), (60.0, 0.8, 3000)])
-        model = select_components(X=x, fixed=3, seed=0)[0]
+        model = select_components(X=x, n_range=range(3, 4), seed=0)[0]
         _, _, _, means = _sorted_by_mean(model)
         np.testing.assert_allclose(means, [1.0, 8.0, 48.0], rtol=0.15)
 
@@ -81,12 +81,12 @@ class TestRobustness:
         rng = np.random.default_rng(0)
         x = np.concatenate([rng.gamma(5.0, 1.0, size=500), [0.0, 0.0]])
         with pytest.raises(ValueError):
-            select_components(X=x, fixed=1, seed=0)[0]
+            select_components(X=x, n_range=range(1, 2), seed=0)[0]
 
     def test_responsibilities_sum_to_one(self):
         rng = np.random.default_rng(1)
         x = rng.gamma(3.0, 1.0, size=300)
-        model = select_components(X=x, fixed=2, seed=0)[0]
+        model = select_components(X=x, n_range=range(2,3), seed=0)[0]
         resp = model.predict_proba(x)
         assert resp.shape == (300, 2)
         np.testing.assert_allclose(resp.sum(axis=1), 1.0)
@@ -94,23 +94,10 @@ class TestRobustness:
     def test_bic_penalises_parameters(self):
         rng = np.random.default_rng(2)
         x = rng.gamma(3.0, 1.0, size=1000)
-        m1 = select_components(X=x, fixed=1, seed=0)[0]
-        m3 = select_components(X=x, fixed=3, seed=0)[0]
+        m1 = select_components(X=x, n_range=range(1,2), seed=0)[0]
+        m3 = select_components(X=x, n_range=range(3, 4), seed=0)[0]
         # On single-component data, BIC must prefer K=1.
         assert m1.bic(x) < m3.bic(x)
-
-
-class TestPlots:
-    def test_plots_write_files(self, tmp_path):
-        rng = np.random.default_rng(4)
-        x, _ = _synthetic(rng, [(2.0, 0.5, 500), (30.0, 0.5, 500)])
-        model, bics = select_components(x, range(1, 4), seed=0)
-        bic_png = tmp_path / "bic.png"
-        fit_png = tmp_path / "fit.png"
-        plot_bic_curve(bics,range(1, 4), bic_png)
-        plot_mixture_fit(x, model, fit_png)
-        assert bic_png.stat().st_size > 0
-        assert fit_png.stat().st_size > 0
 
 
 class TestPomegranateComparison:

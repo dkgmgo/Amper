@@ -17,7 +17,7 @@ def test_identical_diagrams_have_zero_distance():
     edges, values = square()
     st = build_simplex_tree(edges, values)
     dgms = [st.persistence_intervals_in_dimension(i) for i in (0, 1)]
-    dists = diagram_distances(dgms, dgms, essential_cap=2.0)
+    dists = diagram_distances(dgms, dgms)
     for value in dists.values():
         assert value == pytest.approx(0.0, abs=1e-12)
 
