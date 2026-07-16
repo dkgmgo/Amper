@@ -52,7 +52,7 @@ def wasserstein_distance(d1: Diagram, d2: Diagram, order: float = 1.0) -> float:
     return _gudhi_wasserstein(d1, d2, order=order, internal_p=float('inf'), keep_essential_parts=True)
 
 
-def diagram_distances(original: Diagrams, surrogate: Diagrams, essential_cap: float, dims: Sequence[int] = (0, 1)) -> dict[tuple[int, str], float]:
+def diagram_distances(original: Diagrams, surrogate: Diagrams, dims: Sequence[int] = (0, 1)) -> dict[tuple[int, str], float]:
     """
     All (dimension, metric) distances between two diagram sets.
     """
@@ -64,3 +64,14 @@ def diagram_distances(original: Diagrams, surrogate: Diagrams, essential_cap: fl
         out[(dim, "bottleneck")] = bottleneck_distance(a, b)
         out[(dim, "wasserstein")] = wasserstein_distance(a, b)
     return out
+
+
+def get_topology(edgs: list, dists: list, expansion_dim: int) -> Diagrams:
+    pairs = list(zip(edgs, dists))
+    pairs = sorted(pairs, key= lambda p: p[1])
+    edges, distances = [], []
+    for e, d in pairs:
+        edges.append(e)
+        distances.append(d)
+    st = build_simplex_tree(edges, distances, expansion_dim)
+    return [st.persistence_intervals_in_dimension(i) for i in (0,1)]

@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 #: Edge attribute recording the layer at which a surrogate edge was generated.
 LAYER_KEY = "layer"
 
-GENERATORS = ("er") #we may try other that Erdos-Renyi
+GENERATORS = ("er",) #we may try other that Erdos-Renyi
 
 
 def _ekey(u: Hashable, v: Hashable) -> Edge:
@@ -139,15 +139,6 @@ def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rn
         entry["lost"] = m - len(new)
         report["layers"].append(entry)
     return H, report
-
-
-def generate_replicates(G: nx.Graph, assignment: LayerAssignment, generator: str, n_replicates: int, seed_seq: np.random.SeedSequence) -> list[tuple[nx.Graph, dict]]:
-    """Generate `n_replicates` independent surrogates, reproducibly seeded."""
-    out = []
-    for child in seed_seq.spawn(n_replicates):
-        rng = np.random.default_rng(child)
-        out.append(build_surrogate(G, assignment, generator, rng))
-    return out
 
 
 def assign_surrogate_distances(H: nx.Graph, assignment: LayerAssignment, model: GammaMixture, rng: np.random.Generator, feature_attr: str = DISTANCE_KEY) -> None:

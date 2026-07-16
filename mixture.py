@@ -148,17 +148,17 @@ class GammaMixture:
         return samples
 
 
-def select_components(X: Iterable[float], n_range: range = None, fixed: int = None, max_iter: int = 1000, seed: int = 0) -> tuple[GammaMixture, list]:
+def select_components(X: Iterable[float], n_range: range = None, max_iter: int = 1000, n_init=5, seed: int = 0) -> tuple[GammaMixture, list]:
     """
     Selects the best number of mixture components based on BIC scores
     """
-    if fixed is not None:
-        log.info(f"Using fixed n_components = {fixed} ...")
-        gmm = GammaMixture(n_components=fixed, max_iter=max_iter, random_state=seed)
-        gmm.fit(X)
-        return gmm, None
+    #TODO include n_init in model selection
+    n_range = list(n_range)
+    if len(n_range) == 1:
+        log.info(f"Using fixed n_components = {n_range[0]} ...")
+    else:
+        log.info(f"Selecting the best n_components in {n_range} ...")
     
-    log.info(f"Selecting the best n_components in {list(n_range)} ...")
     bics, models = [], []
     for k in tqdm(n_range):
         gmm = GammaMixture(n_components=k, max_iter=max_iter, random_state=seed)
@@ -169,74 +169,3 @@ def select_components(X: Iterable[float], n_range: range = None, fixed: int = No
     best_k = list(n_range)[best_index]
     log.info(f"Best n_components by BIC: {best_k}")
     return models[best_index], bics
-
-# --------------------------------------------------------------------------
-# Plots
-# --------------------------------------------------------------------------
-
-def _pyplot():
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    return plt
-
-
-def plot_bic_curve(bics: dict[int, float], n_range: range, path: str | Path) -> None:
-    """Save the BIC-vs-K curve, marking the selected K."""
-    plt = _pyplot()
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ks = list(n_range)
-    ax.plot(ks, bics, "o-", label="BIC", linewidth=2, color="blue")
-    best = ks[np.argmin(bics)]
-    ax.axvline(best, color="red", linestyle="--", label=f"selected K={best}")
-    ax.set_xlabel("number of components K")
-    ax.set_ylabel("BIC")
-    ax.set_title("Gamma mixture model selection")
-    ax.legend()
-    ax.grid(True)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def plot_mixture_fit(X: Iterable[float], model: GammaMixture, path: str | Path, bins: int = 60) -> None:
-    """Save the fitted mixture density over the empirical histogram."""
-    plt = _pyplot()
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    X = np.array(X)
-
-    # histogram
-    ax.hist(X, bins=bins, density=True, alpha=0.8, color="lightgray", edgecolor="white", label="Edge Distances")
-
-    x = np.linspace(X.min(), X.max(), 512)
-    pdfs = []
-    for k in range(model.n_components):
-        alpha = model.alphas_[k]
-        beta = model.betas_[k]
-        pdfs.append(gamma.pdf(x, a=alpha, scale=1/beta))
-
-    pdfs = np.vstack(pdfs).T
-    total = np.zeros_like(x)
-
-    # plot components
-    cmap = plt.get_cmap("tab10")
-    order = np.argsort(model.means_.ravel())
-    for rank, k in enumerate(order):
-        weight = model.weights_[k]
-        y = weight * pdfs[:, k]
-        ax.plot(x, y, label=f"Cluster {rank} (mean={model.means_[k]:.3g}, w={model.weights_[k]:.2f})", linewidth=2, color=cmap((rank - 1) % 10))
-        total += y
-
-    # total mixture
-    ax.plot(x, total, "k--", label="Total Mixture", linewidth=1.5)
-
-    ax.set_xlabel("Edge Distance")
-    ax.set_ylabel("Density")
-    ax.set_title(f"Gamma mixture fit (K={model.n_components})")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
