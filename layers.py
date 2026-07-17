@@ -65,17 +65,13 @@ class LayerAssignment:
         idx = np.nonzero(self.hard_ranks == rank)[0]
         return [self.edges[i] for i in idx]
 
-    def cumulative_node_sets(self) -> list[set]:
-        """Element ``k-1`` is the set of nodes touched by layers 1..k."""
-        #TODO: can use a cache here
-        out: list[set] = []
-        current: set = set()
-        for k in range(1, self.n_layers + 1):
-            for u, v in self.layer_edges(k):
-                current.add(u)
-                current.add(v)
-            out.append(set(current))
-        return out
+    def layer_nodes(self, rank: int) -> set:
+        """Nodes incident to at least one edge hard-assigned to layer `rank` (1-based). A node can belong to several layers."""
+        nodes: set = set()
+        for u, v in self.layer_edges(rank):
+            nodes.add(u)
+            nodes.add(v)
+        return nodes
 
     def node_first_layer(self) -> dict[Hashable, int]:
         """Rank of the earliest layer each node appears in."""

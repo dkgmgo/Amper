@@ -53,12 +53,11 @@ def test_component_order_reindexes_responsibilities(toy):
         assert a.responsibilities[i].argmax() == expected_col
 
 
-def test_cumulative_node_sets_and_first_layer(toy):
+def test_layer_nodes_and_first_layer(toy):
     G, model, _, _ = toy
     a = assign_layers(G, model)
-    cumul = a.cumulative_node_sets()
-    assert cumul[0] == {"a", "c", "d", "e"}  # backbone touches only bridge endpoints
-    assert cumul[1] == set(G.nodes())
+    assert a.layer_nodes(1) == {"a", "c", "d", "e"}  # backbone touches only bridge endpoints
+    assert a.layer_nodes(2) == set(G.nodes())  # every node has an intra-triangle edge
     first = a.node_first_layer()
     assert first == {"a": 1, "c": 1, "d": 1, "e": 1, "b": 2, "f": 2}
 

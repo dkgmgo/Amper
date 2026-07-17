@@ -1,5 +1,5 @@
 """
-Hierarchical surrogate construction: ER / configuration / SBM per layer.
+Hierarchical surrogate construction: ER, .
 
 The surrogate starts with all original nodes and is assembled layer by
 layer in component order (backbone first).
@@ -112,14 +112,13 @@ def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rn
     H = nx.Graph()
     H.add_nodes_from(G.nodes())
     taken: set = set()
-    cumulative = assignment.cumulative_node_sets()
     report: dict = {"generator": generator, "layers": []}
     new = []
 
     for k in range(1, assignment.n_layers + 1):
         original = assignment.layer_edges(k)
         m = len(original)
-        allowed = sorted(cumulative[k - 1], key=str)
+        allowed = sorted(assignment.layer_nodes(k), key=str)
         entry: dict = {"rank": k, "target": m, "generated": 0, "lost": m}
 
         if m == 0 or len(allowed) < 2:

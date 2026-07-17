@@ -32,10 +32,9 @@ def test_node_constraint_and_layer_tags(toy, generator):
     rng = np.random.default_rng(0)
     H, _ = build_surrogate(G, a, generator, rng)
     assert set(H.nodes()) == set(G.nodes())  # all nodes present from the start
-    cumulative = a.cumulative_node_sets()
     for u, v, data in H.edges(data=True):
         k = data[LAYER_KEY]
-        allowed = cumulative[k - 1]
+        allowed = a.layer_nodes(k)
         assert u in allowed and v in allowed
 
 
