@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from datasets import DISTANCE_KEY, load_record
+from datasets import DISTANCE_KEY, load_record, write_graphml
 from builder import GENERATORS, build_surrogate, assign_surrogate_distances, surrogate_edge_layers
 from layers import assign_layers, edge_distances, layer_diagnostics
 from mixture import select_components
@@ -97,9 +97,10 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
         log.info("%s: %s", gen, {f"H{d}-{m}": round(v, 5) for (d, m), v in sorted(diffs.items())})
 
         stem = f"{record.label}_{gen}"
-        plot_graphs(G, H, out / f"{stem}_graph.png", model=model)
-        plot_topology(original_topology, surrogate_topology, out / f"{stem}_topology.png", x_range)
+        plot_graphs(G, H, out / f"{gen}_graph.png", model=model)
+        plot_topology(original_topology, surrogate_topology, out / f"{gen}_topology.png", x_range)
         plot_dashboard(bics, n_range, x, model, G, H, original_topology, surrogate_topology, out / f"{stem}_dashboard.png", x_range)
+        write_graphml(G, out/f"{stem}_surrogate.graphml")
 
     _write_csv(out / "generation_report.csv", ["generator", "rank", "target_edges", "generated_edges", "lost_edges"], gen_report_rows)
 
@@ -120,7 +121,7 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     cfg = PipelineConfig(
-        input_path="./data/in/bottleneckRicci.graphml",
+        input_path="./data/in/ErdosRenyiRicci.graphml",
         output_dir="./data/out",
         n_range=range(1, 9),
         fixed=3,

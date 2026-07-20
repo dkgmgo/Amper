@@ -218,7 +218,6 @@ def plot_topology(original: Diagrams, surrogate: Diagrams, path: str | Path, x_r
     log.info(f"Topology plot saved to {path}")
 
 
-
 def plot_dashboard(bics: Sequence[float], n_range: range, X: Iterable[float], model: GammaMixture, G_original: nx.Graph, G_surrogate: nx.Graph,
     original: Diagrams, surrogate: Diagrams, path: str | Path, x_range: np.ndarray, dims: Sequence[int] = (0, 1), bins: int = 60, seed: int = 42) -> None:
     """Save the full dashboard to PNG on a 3x2 gridspec"""

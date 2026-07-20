@@ -115,6 +115,11 @@ def load_graph(path: str | Path, feature_attr: str = DISTANCE_KEY) -> nx.Graph:
 
     return G
 
+def write_graphml(G: nx.Graph, path: str | Path) -> None:
+    """Write the content of a graph into a .graphml file"""
+    nx.write_graphml_lxml(G, path)
+    log.info("Graph written successfully")
+
 
 def load_record(path: str | Path, feature_attr: str = DISTANCE_KEY) -> GraphRecord:
     """Load a graph file together with its parsed dataset identity."""
