@@ -5,6 +5,7 @@ Plotting utilities.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -12,6 +13,7 @@ import networkx as nx
 import numpy as np
 from scipy.stats import gamma
 
+from datasets import DISTANCE_KEY
 from mixture import GammaMixture
 
 log = logging.getLogger(__name__)
@@ -59,13 +61,13 @@ def _draw_mixture_fit(ax, X: Iterable[float], model: GammaMixture, bins: int = 6
     pdfs = np.vstack(pdfs).T
     total = np.zeros_like(x)
 
-    # plot components
+    # plot components (rank 1 = backbone = largest mean, same convention and colors as edge layers)
     cmap = plt.get_cmap("tab10")
-    order = np.argsort(model.means_.ravel())
-    for rank, k in enumerate(order):
+    order = np.argsort(-model.means_.ravel(), kind="stable")
+    for rank, k in enumerate(order, start=1):
         weight = model.weights_[k]
         y = weight * pdfs[:, k]
-        ax.plot(x, y, label=f"Cluster {rank} (mean={model.means_[k]:.3g}, w={model.weights_[k]:.2f})", linewidth=2, color=cmap((rank - 1) % 10))
+        ax.plot(x, y, label=f"Layer {rank} (mean={model.means_[k]:.3g}, w={model.weights_[k]:.2f})", linewidth=2, color=cmap((rank - 1) % 10))
         total += y
 
     # total mixture
@@ -78,10 +80,49 @@ def _draw_mixture_fit(ax, X: Iterable[float], model: GammaMixture, bins: int = 6
     ax.grid(True, alpha=0.3)
 
 
-def _draw_graph(ax, G: nx.Graph, title: str, seed: int = 42, node_color: str = "steelblue") -> None:
-    """Draw a networkx graph on a given axis."""
+def _edge_layer_ranks(G: nx.Graph, model: GammaMixture, feature_attr: str = DISTANCE_KEY, layer_attr: str = "layer") -> dict:
+    """
+    Hard layer rank (1 = backbone) per edge: taken from `layer_attr`
+    """
+    order = np.argsort(-model.means_, kind="stable")
+    ranks: dict = {}
+    pending: list = []
+    dists: list[float] = []
+    for u, v, data in G.edges(data=True):
+        if layer_attr in data:
+            ranks[(u, v)] = int(data[layer_attr])
+            continue
+        try:
+            d = float(data.get(feature_attr))
+        except (TypeError, ValueError):
+            d = math.nan
+        if math.isfinite(d) and d >= 0.0:
+            pending.append((u, v))
+            dists.append(d)
+    if pending:
+        hard = model.predict_proba(np.asarray(dists))[:, order].argmax(axis=1) + 1
+        for e, r in zip(pending, hard):
+            ranks[e] = int(r)
+    return ranks
+
+
+def _draw_graph(ax, G: nx.Graph, title: str, seed: int = 42, node_color: str = "gray", model: Optional[GammaMixture] = None) -> None:
+    """Draw a networkx graph on a given axis. With `model`, edges are colored by their mixture-component layer."""
     pos = nx.spring_layout(G, seed=seed)
-    nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.4, width=0.8)
+    if model is None:
+        nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.4, width=0.8)
+    else:
+        plt = _pyplot()
+        cmap = plt.get_cmap("tab10")
+        #TODO can improve this
+        ranks = _edge_layer_ranks(G, model)
+        for rank in range(1, model.n_components + 1):
+            layer = [e for e, r in ranks.items() if r == rank]
+            if not layer:
+                continue
+            nx.draw_networkx_edges(G, pos, edgelist=layer, ax=ax, alpha=0.6, width=0.9,
+                                   edge_color=[cmap((rank - 1) % 10)], label=f"Layer {rank}")
+        ax.legend(fontsize=8, loc="lower right")
     nx.draw_networkx_nodes(G, pos, ax=ax, node_size=60, node_color=node_color, linewidths=0.5, edgecolors="white")
     ax.set_title(f"{title}\n({G.number_of_nodes()} nodes, {G.number_of_edges()} edges)")
     ax.set_axis_off()
@@ -150,12 +191,12 @@ def plot_model_selection(bics: Sequence[float], n_range: range, X: Iterable[floa
     log.info(f"Model selection plot saved to {path}")
 
 
-def plot_graphs(G_original: nx.Graph, G_surrogate: nx.Graph, path: str | Path, seed: int = 42) -> None:
+def plot_graphs(G_original: nx.Graph, G_surrogate: nx.Graph, path: str | Path, seed: int = 42, model: Optional[GammaMixture] = None) -> None:
     """Save the original and surrogate graphs side by side in a single figure."""
     plt = _pyplot()
     fig, (ax_o, ax_s) = plt.subplots(1, 2, figsize=(13, 5.5))
-    _draw_graph(ax_o, G_original, "Original graph", seed=seed, node_color="steelblue")
-    _draw_graph(ax_s, G_surrogate, "Surrogate graph", seed=seed, node_color="darkorange")
+    _draw_graph(ax_o, G_original, "Original graph", seed=seed, node_color="gray", model=model)
+    _draw_graph(ax_s, G_surrogate, "Surrogate graph", seed=seed, node_color="gray", model=model)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -191,8 +232,8 @@ def plot_dashboard(bics: Sequence[float], n_range: range, X: Iterable[float], mo
     _draw_mixture_fit(fig.add_subplot(gs[0, 1]), X, model, bins=bins)
  
     # row 2: graphs
-    _draw_graph(fig.add_subplot(gs[1, 0]), G_original, "Original graph", seed=seed, node_color="steelblue")
-    _draw_graph(fig.add_subplot(gs[1, 1]), G_surrogate, "Surrogate graph", seed=seed, node_color="darkorange")
+    _draw_graph(fig.add_subplot(gs[1, 0]), G_original, "Original graph", seed=seed, node_color="gray", model=model)
+    _draw_graph(fig.add_subplot(gs[1, 1]), G_surrogate, "Surrogate graph", seed=seed, node_color="gray", model=model)
  
     # row 3: topology
     gs_pers = gs[2, 0].subgridspec(1, 2, wspace=0.35)
