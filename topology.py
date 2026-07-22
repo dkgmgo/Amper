@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Hashable, Mapping, Optional, Sequence
+from typing import Hashable, Iterable, Optional, Sequence
 
 import gudhi as gd
 import networkx as nx
@@ -28,14 +28,13 @@ WASSERSTEIN_METHODS = ("sliced", "exact")
 _EXACT_WASSERSTEIN_WARN_BARS = 8000
 
 
-def build_simplex_tree(edges: Sequence[Edge], edge_values: Sequence[float], expansion_dim: int = 2) -> gd.SimplexTree:
+def build_simplex_tree(edges: Sequence[Edge], edge_values: Sequence[float], nodes: Iterable[Hashable], expansion_dim: int = 2) -> gd.SimplexTree:
     """
     Persistence diagrams of the clique complex of a filtered graph.
     """
     st = gd.SimplexTree()
-    nodes = set([u for e in edges for u in e])
-    index = {v: i for i, v in enumerate(nodes)}
-    for v in nodes:
+    index = {v: i for i, v in enumerate(sorted(nodes, key=str))}
+    for v in index:
         st.insert([index[v]], filtration=0.0)
     for (u, v), f in zip(edges, edge_values):
         st.insert([index[u], index[v]], filtration=float(f))
@@ -123,12 +122,12 @@ def diagram_distances(original: Diagrams, surrogate: Diagrams, dims: Sequence[in
     return out
 
 
-def get_topology(edgs: list, dists: list, expansion_dim: int) -> Diagrams:
+def get_topology(edgs: list, dists: list, nodes: Iterable[Hashable], expansion_dim: int) -> Diagrams:
     pairs = list(zip(edgs, dists))
     pairs = sorted(pairs, key= lambda p: p[1])
     edges, distances = [], []
     for e, d in pairs:
         edges.append(e)
         distances.append(d)
-    st = build_simplex_tree(edges, distances, expansion_dim)
+    st = build_simplex_tree(edges, distances, nodes, expansion_dim)
     return [st.persistence_intervals_in_dimension(i) for i in (0,1)]

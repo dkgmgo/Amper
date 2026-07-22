@@ -182,8 +182,8 @@ def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rn
         entry["generated"] = len(new)
         entry["lost"] = m - len(new)
         report["layers"].append(entry)
-    
-    log.debug("Surrogate builded successfully")
+
+    log.debug("Surrogate built successfully")
     return H, report
 
 

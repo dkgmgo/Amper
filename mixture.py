@@ -69,7 +69,7 @@ class GammaMixture:
     
     def _initialize(self, X):
         #TODO maybe scale it
-        kmeans = KMeans(n_clusters=self.n_components, n_init=10).fit(X.reshape(-1, 1))
+        kmeans = KMeans(n_clusters=self.n_components, n_init=10, random_state=self.random_state).fit(X.reshape(-1, 1))
         labels = kmeans.labels_
 
         self.weights_ = np.zeros(self.n_components)

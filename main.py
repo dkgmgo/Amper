@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import networkx as nx
 
 from datasets import DISTANCE_KEY, load_record, write_graphml
 from builder import GENERATORS, build_surrogate, assign_surrogate_distances, surrogate_edge_layers
@@ -70,11 +71,9 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
         )
     _write_csv(out / "layer_diagnostics.csv", list(diagnostics[0].keys()), [list(r.values()) for r in diagnostics])
 
-    original_topology = get_topology(assignment.edges, assignment.distances, cfg.expansion_dim)
-
-    x_range = np.linspace(0, assignment.distances.max() * 1.05, 256)
-    #x_range = sorted(assignment.distances)
-    cap = float(assignment.distances.max())
+    nodes = list(G.nodes())
+    original_topology = get_topology(assignment.edges, assignment.distances, nodes, cfg.expansion_dim)
+    cap = None
 
     metrics: dict[tuple[str, str, int, str], float] = {}
     gen_report_rows: list[list] = []
@@ -83,19 +82,23 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
         rng = np.random.default_rng([cfg.seed, gi])
         dist_rng = np.random.default_rng([cfg.seed, gi, 1])
 
-        H, report = build_surrogate(G, assignment, gen, rng, model.n_components)
+        H, report = build_surrogate(G, assignment, gen, rng, model.n_components*2)
         for entry in report["layers"]:
             gen_report_rows.append([gen, entry["rank"], entry["target"], entry["generated"], entry["lost"]])
         assign_surrogate_distances(H, assignment, model, dist_rng, cfg.feature_attr)
         edges, _ = surrogate_edge_layers(H)
+        log.info("Number of triangles orig vs surr: %d vs %d", sum(nx.triangles(G).values()) // 3, sum(nx.triangles(H).values()) // 3)
         _, dists = edge_distances(H, cfg.feature_attr)
-        surrogate_topology = get_topology(edges, dists, cfg.expansion_dim)
+        surrogate_topology = get_topology(edges, dists, nodes, cfg.expansion_dim)
 
+        cap = max(assignment.distances.max(), dists.max())
         diffs = diagram_distances(original_topology, surrogate_topology, cap=cap, wasserstein_method=cfg.wasserstein_method, num_directions=cfg.num_directions)
         for (dim, metric), value in diffs.items():
             metrics[(record.label, gen, dim, metric)] = float(value)
         log.info("%s: %s", gen, {f"H{d}-{m}": round(v, 5) for (d, m), v in sorted(diffs.items())})
 
+        x_range = np.linspace(0, cap * 1.05, 256)
+        #x_range = sorted(assignment.distances)
         stem = f"{record.label}_{gen}"
         plot_graphs(G, H, out / f"{gen}_graph.png", model=model)
         plot_topology(original_topology, surrogate_topology, out / f"{gen}_topology.png", x_range)

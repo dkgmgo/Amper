@@ -15,7 +15,7 @@ def square():
 
 def test_identical_diagrams_have_zero_distance():
     edges, values = square()
-    st = build_simplex_tree(edges, values)
+    st = build_simplex_tree(edges, values, set([x for e in edges for x in e]))
     dgms = [st.persistence_intervals_in_dimension(i) for i in (0, 1)]
     dists = diagram_distances(dgms, dgms)
     for value in dists.values():
