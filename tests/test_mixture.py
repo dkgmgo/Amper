@@ -100,6 +100,45 @@ class TestRobustness:
         assert m1.bic(x) < m3.bic(x)
 
 
+class TestSampling:
+    """`GammaMixture.sample` must be driven only by `random_state`."""
+
+    def _fitted(self, seed=0):
+        rng = np.random.default_rng(123)
+        x, _ = _synthetic(rng, [(2.0, 0.5, 1000), (30.0, 0.5, 1000)])
+        return select_components(X=x, n_range=range(2, 3), seed=seed)[0]
+
+    def test_same_random_state_gives_same_samples(self):
+        a = self._fitted()
+        b = self._fitted()
+        np.testing.assert_array_equal(a.sample(50), b.sample(50))
+
+    def test_samples_ignore_global_numpy_seed(self):
+        np.random.seed(1234)
+        first = self._fitted().sample(50)
+        np.random.seed(9999)
+        second = self._fitted().sample(50)
+
+        np.testing.assert_array_equal(first, second)
+
+    def test_with_components_matches_component_of_each_sample(self):
+        model = self._fitted()
+        samples, components = model.sample(4000, with_components=True)
+
+        assert samples.shape == components.shape == (4000,)
+        assert set(np.unique(components)) <= {0, 1}
+        for k in range(model.n_components):
+            drawn = samples[components == k]
+            if drawn.size > 100:
+                expected = model.alphas_[k] / model.betas_[k]
+                np.testing.assert_allclose(drawn.mean(), expected, rtol=0.15)
+
+    def test_sample_mean_matches_mixture_mean(self):
+        model = self._fitted()
+        expected = float(np.sum(model.weights_ * model.means_))
+        np.testing.assert_allclose(model.sample(20000).mean(), expected, rtol=0.10)
+
+
 class TestPomegranateComparison:
     """Compare our EM against pomegranate's Gamma mixture"""
 

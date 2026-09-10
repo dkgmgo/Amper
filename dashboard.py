@@ -15,6 +15,7 @@ from scipy.stats import gamma
 
 from datasets import DISTANCE_KEY
 from mixture import GammaMixture
+from topology import betti_curve
 
 log = logging.getLogger(__name__)
 
@@ -147,20 +148,6 @@ def _draw_persistence_diagram(ax, diagrams: Diagrams, title: str, dims: Sequence
     ax.set_title(title)
  
  
-def _betti_curve(diagram: Diagram, x_range: np.ndarray) -> np.ndarray:
-    """
-    Betti curve: number of intervals alive at each x_range value.
-    Works directly with +inf deaths (inf > R is always True), so
-    essential features stay alive over the whole x_range — no cap needed.
-    """
-    if diagram is None or len(diagram) == 0:
-        return np.zeros_like(x_range, dtype=int)
-    d = np.asarray(diagram, dtype=float)
-    births = d[:, 0]
-    deaths = d[:, 1]
-    return ((births[None, :] <= x_range[:, None]) & (deaths[None, :] > x_range[:, None])).sum(axis=1)
- 
- 
 def _draw_betti_curves(ax, diagrams: Diagrams, title: str, x_range: np.ndarray, dims: Sequence[int] = (0, 1)) -> None:
     """Draw Betti curves (all homology dimensions) on a given axis."""
     plt = _pyplot()
@@ -169,7 +156,7 @@ def _draw_betti_curves(ax, diagrams: Diagrams, title: str, x_range: np.ndarray, 
     for dim in dims:
         if dim >= len(diagrams):
             continue
-        betti = _betti_curve(diagrams[dim], x_range)
+        betti = betti_curve(diagrams[dim], x_range)
         ax.step(x_range, betti, where="post", linewidth=2, color=cmap(dim), label=f"$\\beta_{dim}$")
  
     ax.set_xlabel("filtration value")
@@ -212,6 +199,7 @@ def plot_topology(original: Diagrams, surrogate: Diagrams, path: str | Path, x_r
     _draw_persistence_diagram(axes[0, 1], surrogate, "Persistence diagram - surrogate", dims=dims)
     _draw_betti_curves(axes[1, 0], original, "Betti curves - original", x_range=x_range, dims=dims)
     _draw_betti_curves(axes[1, 1], surrogate, "Betti curves - surrogate", x_range=x_range, dims=dims)
+    #TODO: add barcodes
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)

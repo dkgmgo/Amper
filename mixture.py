@@ -10,7 +10,6 @@ from typing import Iterable
 
 import numpy as np
 from scipy.special import gammaln, logsumexp, psi
-from scipy.stats import gamma
 from tqdm import tqdm
 from sklearn.cluster import KMeans
 from scipy.optimize import fsolve
@@ -137,10 +136,7 @@ class GammaMixture:
     
     def sample(self, n_samples, with_components=False):
         components = self.rng_.choice(self.n_components, size=n_samples, p=self.weights_)
-        samples = np.array([
-            gamma.rvs(self.alphas_[k], scale=1.0 / self.betas_[k])
-            for k in components
-        ])
+        samples = self.rng_.gamma(self.alphas_[components], 1.0 / self.betas_[components])
 
         if with_components:
             return samples, components

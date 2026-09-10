@@ -122,6 +122,44 @@ def diagram_distances(original: Diagrams, surrogate: Diagrams, dims: Sequence[in
     return out
 
 
+def betti_curve(diagram: Diagram, x_range: np.ndarray) -> np.ndarray:
+    """
+    Betti curve: number of intervals alive at each `x_range` value. Essential features stay alive over the whole range and no cap is needed.
+    """
+    if diagram is None or len(diagram) == 0:
+        return np.zeros_like(x_range, dtype=int)
+    d = np.asarray(diagram, dtype=float)
+    births, deaths = d[:, 0], d[:, 1]
+    return ((births[None, :] <= x_range[:, None]) & (deaths[None, :] > x_range[:, None])).sum(axis=1)
+
+
+def essential_count(diagram: Diagram) -> int:
+    """Number of bars that never die (final Betti number of the filtration)."""
+    a = _as_diagram(diagram)
+    return int(np.isinf(a[:, 1]).sum()) if a.size else 0
+
+
+def betti_distances(original: Diagrams, surrogate: Diagrams, x_range: np.ndarray, dims: Sequence[int] = (0, 1)) -> dict[tuple[int, str], float]:
+    """
+    Distances between Betti curves, evaluated on a shared `x_range`.
+
+    `betti_l1` integrates |beta_orig - beta_surr| over the range
+    """
+    x_range = np.asarray(x_range, dtype=float)
+    if x_range.size < 2:
+        raise ValueError("x_range needs at least two points to integrate over.")
+    dx = float(x_range[1] - x_range[0])
+
+    out: dict[tuple[int, str], float] = {}
+    for dim in dims:
+        bo = betti_curve(original[dim] if original and dim < len(original) else None, x_range).astype(float)
+        bs = betti_curve(surrogate[dim] if surrogate and dim < len(surrogate) else None, x_range).astype(float)
+        gap = np.abs(bo - bs)
+        l1 = float(gap.sum() * dx)
+        out[(dim, "betti_l1")] = l1
+    return out
+
+
 def get_topology(edgs: list, dists: list, nodes: Iterable[Hashable], expansion_dim: int) -> Diagrams:
     pairs = list(zip(edgs, dists))
     pairs = sorted(pairs, key= lambda p: p[1])
@@ -130,4 +168,4 @@ def get_topology(edgs: list, dists: list, nodes: Iterable[Hashable], expansion_d
         edges.append(e)
         distances.append(d)
     st = build_simplex_tree(edges, distances, nodes, expansion_dim)
-    return [st.persistence_intervals_in_dimension(i) for i in (0,1)]
+    return [st.persistence_intervals_in_dimension(i) for i in range(expansion_dim)]
