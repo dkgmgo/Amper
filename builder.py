@@ -1,7 +1,5 @@
 """
-Hierarchical surrogate construction: ER / ER stratified.
-
-The surrogate starts with all original nodes and is assembled layer by layer.
+Hierarchical surrogate construction.
 """
 
 from __future__ import annotations
@@ -20,10 +18,21 @@ from mixture import GammaMixture
 
 log = logging.getLogger(__name__)
 
-#: Edge attribute recording the layer at which a surrogate edge was generated.
+# Edge attribute recording the layer at which a surrogate edge was generated.
 LAYER_KEY = "layer"
 
-GENERATORS = ("er", "er_strat")
+# Simple ER generators
+_RANDOM = ("er", "er_strat")
+
+# Generators that differ only in how short layers and the long budget are placed.
+_LAYERED = {
+    #  name        short   long      short-layer build order
+    "ws_layer":   ("ring", "er",     "asc"),
+    "er_hier":    ("er",   "bridge", "asc"),
+    "ws_hier":    ("ring", "bridge", "asc"),
+}
+
+GENERATORS = tuple(list(_RANDOM) + list(_LAYERED.keys()))
 
 
 def _ekey(u: Hashable, v: Hashable) -> Edge:
@@ -128,26 +137,16 @@ def _sample_er_stratified_layer(original_edges: Sequence[Edge], layer_nodes: set
     budgets, nodes_by_block = _block_pair_budgets(original_edges, layer_nodes, node_blocks)
 
     edges: list[Edge] = []
-    strata: dict = {}
     for (ba, bb), m in sorted(budgets.items()):
         new = _sample_distinct_pairs(nodes_by_block[ba], nodes_by_block[bb], m, taken, rng, same_set=(ba == bb))
         label = f"{ba}-{bb}"
         if len(new) < m:
             log.warning("Stratum %s: generated %d/%d edges.", label, len(new), m)
         edges.extend(new)
-        strata[label] = {"target": m, "generated": len(new)}
-    return edges, strata
+    return edges
 
 
-def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rng: np.random.Generator, n_clusters: int = 2) -> tuple[nx.Graph, dict]:
-    """
-    Assemble one surrogate graph layer by layer (backbone first).
-
-    Returns ``(H, report)``. Every generated edge carries the layer rank it
-    was generated at under the `LAYER_KEY` attribute.
-    """
-    if generator not in GENERATORS:
-        raise ValueError(f"Unknown generator {generator}; expected one of {GENERATORS}.")
+def _build_random(G: nx.Graph, assignment: LayerAssignment, generator: str, rng: np.random.Generator, n_clusters: int ):
     if generator == "er_strat":
         node_blocks = _cluster_nodes_by_responsibility(assignment, rng, n_clusters=n_clusters)
 
@@ -171,8 +170,7 @@ def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rn
         if generator == "er":
             new = _sample_er_layer(sorted(layer_nodes, key=str), m, taken, rng)
         else:
-            new, strata = _sample_er_stratified_layer(original, layer_nodes, node_blocks, taken, rng)
-            entry["strata"] = strata
+            new = _sample_er_stratified_layer(original, layer_nodes, node_blocks, taken, rng)
 
 
         if len(new) < m:
@@ -185,6 +183,224 @@ def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rn
 
     log.debug("Surrogate built successfully")
     return H, report
+
+
+def _allocate_ranks(count: int, ranks: Sequence[int], sizes: Sequence[int], rng: np.random.Generator) -> list[int]:
+    """Split `count` edges across `ranks` in proportion to the original layer `sizes`."""
+    if count <= 0 or len(ranks) == 0:
+        return []
+    w = np.asarray(sizes, dtype=float)
+    w = w / w.sum() if w.sum() > 0 else np.full(len(ranks), 1.0 / len(ranks))
+    alloc = np.floor(w * count).astype(int)
+    while alloc.sum() < count:                     # hand out the rounding remainder
+        alloc[int(np.argmax(w * count - alloc))] += 1
+    out: list[int] = []
+    for r, a in zip(ranks, alloc):
+        out.extend([int(r)] * int(a))
+    return [out[int(i)] for i in rng.permutation(len(out))]
+
+
+def _degree_heterogeneous_ring_edges(nodes: Sequence, degrees: np.ndarray, taken: set | None = None) -> list[Edge]:
+    """
+    Ring lattice with a heterogeneous degree sequence. Node at ring position `i` aims for 
+    `degrees[i]` links and takes them from the nearest positions that still have spare capacity
+    this mutates taken, and does not guarantee a ring
+    """
+    n = len(nodes)
+    if n < 3:
+        return []
+    remaining = np.asarray(degrees, dtype=int).copy()
+    seen: set[tuple[int, int]] = set()
+    out: list[Edge] = []
+    taken = taken if taken is not None else set()
+
+    for i in [t for t in np.argsort(-remaining)]: # hubs come first
+        j = 1
+        while remaining[i] > 0 and j <= n // 2:
+            for cand in ((i + j) % n, (i - j) % n):
+                if remaining[i] <= 0:
+                    break
+                if cand == i or remaining[cand] <= 0:
+                    continue
+                key = (min(i, cand), max(i, cand))
+                if key in seen:
+                    continue
+                ekey = _ekey(nodes[i], nodes[cand])
+                if ekey in taken:
+                    continue
+                seen.add(key)
+                taken.add(ekey)
+                out.append(ekey)
+                remaining[i] -= 1
+                remaining[cand] -= 1
+            j += 1
+    return out
+
+
+def _hierarchical_pairs(H: nx.Graph, layer_of: Mapping[Hashable, int], m: int, taken: set, rng: np.random.Generator) -> tuple[list[Edge], int]:
+    """
+    Place `m` links whose endpoints sit in different layers, lower rank first. Connected components 
+    of `H` are joined first and the remainder is filled following the layer constraint.
+    """
+    by_layer: dict[int, list] = defaultdict(list)
+    for n, l in layer_of.items():
+        by_layer[int(l)].append(n)
+    for l in by_layer:
+        by_layer[l].sort(key=str)
+    layers = sorted(by_layer)
+
+    # union find for connected components
+    parent = {n: n for n in H.nodes()}
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+    for u, v in H.edges():
+        ru, rv = find(u), find(v)
+        if ru != rv:
+            parent[ru] = rv
+
+    def allowed_targets(l):
+        return [j for j in layers if j > l]
+
+    out: list[Edge] = []
+    merged = 0
+
+    # 1) every pair that joins two components and obeys the layer rule
+    for l in layers:
+        for u in by_layer[l]:
+            if len(out) >= m:
+                break
+            for tl in allowed_targets(l):
+                for v in by_layer.get(tl, ()):
+                    if len(out) >= m:
+                        break
+                    if find(u) == find(v):
+                        continue
+                    key = _ekey(u, v)
+                    if key in taken:
+                        continue
+                    taken.add(key)
+                    out.append(key)
+                    parent[find(u)] = find(v)
+                    merged += 1
+                    break
+
+    # 2) fill the rest with any pair obeying the layer rule
+    attempts, limit = 0, 60 * m + 2000
+    while len(out) < m and attempts < limit:
+        attempts += 1
+        l = layers[int(rng.integers(len(layers)))]
+        tl_choices = allowed_targets(l)
+        tl_choices = [t for t in tl_choices if by_layer.get(t)]
+        if not tl_choices or not by_layer[l]:
+            continue
+        tl = tl_choices[int(rng.integers(len(tl_choices)))]
+        u = by_layer[l][int(rng.integers(len(by_layer[l])))]
+        v = by_layer[tl][int(rng.integers(len(by_layer[tl])))]
+        if u == v:
+            continue
+        key = _ekey(u, v)
+        if key in taken:
+            continue
+        taken.add(key); out.append(key)
+    if len(out) < m:
+        log.warning("Hierarchical placement: %d/%d links (layer constraint exhausted).", len(out), m)
+    return out, merged
+
+
+def _short_layer_edges(assignment: LayerAssignment, n_long: int, taken: set, rng: np.random.Generator, mode: str) -> dict[int, list[Edge]]:
+    """
+    Edges for every short layer, each confined to that layer's own node set.
+    `mode="ring"` gives a degree-heterogeneous ring. 
+    `mode="er"` gives G(n, m).
+    """
+    out: dict[int, list[Edge]] = {}
+    ranks = list(range(n_long + 1, assignment.n_layers + 1))
+    for k in ranks:
+        original = assignment.layer_edges(k)
+        m = len(original)
+        layer_nodes = sorted({n for e in original for n in e}, key=str)
+        if m == 0 or len(layer_nodes) < 2:
+            out[k] = []
+            continue
+        if mode == "er":
+            out[k] = _sample_er_layer(layer_nodes, m, taken, rng)
+            continue
+        sub = nx.Graph()
+        sub.add_nodes_from(layer_nodes)
+        sub.add_edges_from(original)
+        cn = rng.permutation(layer_nodes)
+        deg = np.array([sub.degree(v) for v in cn], dtype=int)
+        new = _degree_heterogeneous_ring_edges(cn, deg, taken=taken)
+        if len(new) < m:
+            new.extend(_sample_distinct_pairs(cn, cn, m - len(new), taken, rng, same_set=True))
+        elif len(new) > m:
+            new = [new[i] for i in sorted(rng.choice(len(new), size=m, replace=False))]
+        out[k] = new
+    return out
+
+
+def _build_layered(G: nx.Graph, assignment: LayerAssignment, rng: np.random.Generator, short: str, long: str, name: str) -> tuple[nx.Graph, dict]:
+    """
+    Build a surrogate layer by layer, short layers first, then the long budget.
+    long=bridge merges connected components built with short.
+    """
+    K = assignment.n_layers
+    n_long = min(2, K//2) if K > 1 else 1
+    long_sizes = [len(assignment.layer_edges(k)) for k in range(1, n_long + 1)]
+
+    H = nx.Graph()
+    H.add_nodes_from(G.nodes())
+    taken: set = set()
+    entries: list[dict] = []
+
+    for k, edges in sorted(_short_layer_edges(assignment, n_long, taken, rng, short).items()):
+        for u, v in edges:
+            H.add_edge(u, v, **{LAYER_KEY: k})
+        tgt = len(assignment.layer_edges(k))
+        entries.append({"rank": k, "target": tgt, "generated": len(edges), "lost": tgt - len(edges)})
+
+    merged = 0
+    if long == "bridge":
+        placed, merged = _hierarchical_pairs(H, assignment.node_first_layer(), sum(long_sizes), taken, rng)
+        tags = _allocate_ranks(len(placed), list(range(1, n_long + 1)), long_sizes, rng) #TODO improve this
+        for (u, v), r in zip(placed, tags):
+            H.add_edge(u, v, **{LAYER_KEY: r})
+    else:
+        for k in range(1, n_long + 1):
+            original = assignment.layer_edges(k)
+            ln = sorted({n for e in original for n in e}, key=str)
+            if original and len(ln) >= 2:
+                for u, v in _sample_er_layer(ln, len(original), taken, rng):
+                    H.add_edge(u, v, **{LAYER_KEY: k})
+    for k in range(1, n_long + 1):
+        tgt = len(assignment.layer_edges(k))
+        got = sum(1 for _, _, d in H.edges(data=True) if int(d[LAYER_KEY]) == k)
+        entries.append({"rank": k, "target": tgt, "generated": got, "lost": tgt - got})
+    entries.sort(key=lambda e: e["rank"])
+
+    m_total = len(assignment.edges)
+    p = sum(long_sizes) / m_total if m_total else 0.0
+    log.info("%s: edges=%d (target %d) p=%.4f n_long=%d merged_components=%d", name, H.number_of_edges(), m_total, p, n_long, merged)
+    return H, {"generator": name, "layers": entries}
+
+
+def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rng: np.random.Generator, n_clusters: int = 2, n_long: int = 2) -> tuple[nx.Graph, dict]:
+    """
+    Assemble one surrogate graph
+
+    Returns ``(H, report)``. Every generated edge carries the layer rank it
+    was generated at under the `LAYER_KEY` attribute.
+    """
+    if generator not in GENERATORS:
+        raise ValueError(f"Unknown generator {generator}; expected one of {GENERATORS}.")
+    if generator in _RANDOM:
+        return _build_random(G, assignment, generator, rng, n_clusters)
+    if generator in _LAYERED:
+        short, long, order = _LAYERED[generator]
+        return _build_layered(G, assignment, rng, short, long, generator)
 
 
 def assign_surrogate_distances(H: nx.Graph, assignment: LayerAssignment, model: GammaMixture, rng: np.random.Generator, feature_attr: str = DISTANCE_KEY) -> None:
