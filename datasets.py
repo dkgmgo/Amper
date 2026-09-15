@@ -91,8 +91,10 @@ def load_graph(path: str | Path, feature_attr: str = DISTANCE_KEY) -> nx.Graph:
     # Validate distances.
     valid: list[float] = []
     bad: list[tuple] = []
+    curvs = []
     for u, v, data in G.edges(data=True):
         d = data.get(feature_attr)
+        curvs.append(data.get("curv"))
         try:
             d = float(d)
         except (TypeError, ValueError):
@@ -112,6 +114,9 @@ def load_graph(path: str | Path, feature_attr: str = DISTANCE_KEY) -> nx.Graph:
     global_var = np.var(valid)
     log.info("Global mean: %f", global_mean)
     log.info("Global variance: %f", global_var)
+    curvs = [c for c in curvs if c is not None]
+    if curvs:
+        log.info("Ricci curvature - Mean : %f, Min: %f, Max: %f, std: %f", np.mean(curvs), np.min(curvs), np.max(curvs), np.std(curvs))
 
     return G
 
