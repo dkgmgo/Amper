@@ -26,10 +26,10 @@ _RANDOM = ("er", "er_strat")
 
 # Generators that differ only in how short layers and the long budget are placed.
 _LAYERED = {
-    #  name        short   long      short-layer build order
-    "ws_layer":   ("ring", "er",     "asc"),
-    "er_hier":    ("er",   "bridge", "asc"),
-    "ws_hier":    ("ring", "bridge", "asc"),
+    #  name        short   long
+    "ws_layer":   ("ring", "er"),
+    "er_hier":    ("er",   "bridge"),
+    "ws_hier":    ("ring", "bridge"),
 }
 
 GENERATORS = tuple(list(_RANDOM) + list(_LAYERED.keys()))
@@ -129,7 +129,7 @@ def _sample_er_layer(allowed: Sequence, m: int, taken: set, rng: np.random.Gener
     return _sample_distinct_pairs(allowed, allowed, m, taken, rng, same_set=True)
 
 
-def _sample_er_stratified_layer(original_edges: Sequence[Edge], layer_nodes: set, node_blocks: Mapping[Hashable, int], taken: set, rng: np.random.Generator) -> tuple[list[Edge], dict]:
+def _sample_er_stratified_layer(original_edges: Sequence[Edge], layer_nodes: set, node_blocks: Mapping[Hashable, int], taken: set, rng: np.random.Generator) -> list[Edge]:
     """
     Stratified G(n, m): one independent G(n, m) per block pair, each matching the
     original layer's edge count for that pair.
@@ -337,7 +337,10 @@ def _short_layer_edges(assignment: LayerAssignment, n_long: int, taken: set, rng
         if len(new) < m:
             new.extend(_sample_distinct_pairs(cn, cn, m - len(new), taken, rng, same_set=True))
         elif len(new) > m:
-            new = [new[i] for i in sorted(rng.choice(len(new), size=m, replace=False))]
+            keep = set(rng.choice(len(new), size=m, replace=False).tolist())
+            taken.difference_update(e for i, e in enumerate(new) if i not in keep)
+            log.warning("Layer %d: ring overshot by %d edges; released them from `taken`.", k, len(new) - m)
+            new = [new[i] for i in sorted(keep)]
         out[k] = new
     return out
 
@@ -387,7 +390,7 @@ def _build_layered(G: nx.Graph, assignment: LayerAssignment, rng: np.random.Gene
     return H, {"generator": name, "layers": entries}
 
 
-def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rng: np.random.Generator, n_clusters: int = 2, n_long: int = 2) -> tuple[nx.Graph, dict]:
+def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rng: np.random.Generator, n_clusters: int = 2) -> tuple[nx.Graph, dict]:
     """
     Assemble one surrogate graph
 
@@ -399,7 +402,7 @@ def build_surrogate(G: nx.Graph, assignment: LayerAssignment, generator: str, rn
     if generator in _RANDOM:
         return _build_random(G, assignment, generator, rng, n_clusters)
     if generator in _LAYERED:
-        short, long, order = _LAYERED[generator]
+        short, long = _LAYERED[generator]
         return _build_layered(G, assignment, rng, short, long, generator)
 
 

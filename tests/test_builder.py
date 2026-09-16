@@ -83,7 +83,7 @@ class TestLayered:
 
     def test_edges_stay_inside_their_layer_node_set(self):
         G, _, a = self._layered()
-        H, _ = build_surrogate(G, a, "ws_layer", np.random.default_rng(0), n_long=1)
+        H, _ = build_surrogate(G, a, "ws_layer", np.random.default_rng(0))
         for u, v, data in H.edges(data=True):
             allowed = a.layer_nodes(int(data[LAYER_KEY]))
             assert u in allowed and v in allowed
@@ -92,7 +92,7 @@ class TestLayered:
         """A node whose only original edge is long must not gain a short one."""
         G, _, a = self._layered()
         for gen in [gen for gen in _LAYERED if 'ws' in gen]:
-            H, _ = build_surrogate(G, a, gen, np.random.default_rng(0), n_long=1)
+            H, _ = build_surrogate(G, a, gen, np.random.default_rng(0))
             short_nodes = set()
             for k in range(2, a.n_layers + 1):
                 short_nodes |= a.layer_nodes(k)
@@ -103,7 +103,7 @@ class TestLayered:
     def test_edge_count_and_nodes(self):
         G, _, a = self._layered()
         for gen in _LAYERED:
-            H, report = build_surrogate(G, a, gen, np.random.default_rng(0), n_long=1)
+            H, report = build_surrogate(G, a, gen, np.random.default_rng(0))
             assert set(H.nodes()) == set(G.nodes())
             assert H.number_of_edges() == len(a.edges)
             assert all(e["lost"] == 0 for e in report["layers"])
@@ -112,7 +112,7 @@ class TestLayered:
         """Every bridge joins two different layers, lower rank to higher."""
         G, _, a = self._layered()
         for gen in [gen for gen in _LAYERED if 'hier' in gen]:
-            H, _ = build_surrogate(G, a, gen, np.random.default_rng(0), n_long=1)
+            H, _ = build_surrogate(G, a, gen, np.random.default_rng(0))
             layer_of = a.node_first_layer()
             crossing = [(u, v) for u, v, d in H.edges(data=True)
                         if int(d[LAYER_KEY]) == 1 and layer_of[u] != layer_of[v]]
@@ -121,14 +121,14 @@ class TestLayered:
     def test_reproducible(self):
         G, _, a = self._layered()
         for gen in _LAYERED:
-            f = lambda s: sorted(build_surrogate(G, a, gen, np.random.default_rng(s), n_long=1)[0].edges())
+            f = lambda s: sorted(build_surrogate(G, a, gen, np.random.default_rng(s))[0].edges())
             assert f(3) == f(3)
             assert f(3) != f(4)
 
     def test_hier_short_layers_stay_in_their_node_set(self):
         G, _, a = self._layered()
         for gen in [gen for gen in _LAYERED if 'hier' in gen]:
-            H, _ = build_surrogate(G, a, gen, np.random.default_rng(0), n_long=1)
+            H, _ = build_surrogate(G, a, gen, np.random.default_rng(0))
             for u, v, d in H.edges(data=True):
                 k = int(d[LAYER_KEY])
                 if k > 1:
