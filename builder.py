@@ -247,6 +247,7 @@ def _hierarchical_pairs(H: nx.Graph, layer_of: Mapping[Hashable, int], m: int, t
         by_layer[int(l)].append(n)
     for l in by_layer:
         by_layer[l].sort(key=str)
+        by_layer[l] = [by_layer[l][i] for i in rng.permutation(len(by_layer[l]))]
     layers = sorted(by_layer)
 
     # union find for connected components
@@ -273,7 +274,12 @@ def _hierarchical_pairs(H: nx.Graph, layer_of: Mapping[Hashable, int], m: int, t
             if len(out) >= m:
                 break
             for tl in allowed_targets(l):
-                for v in by_layer.get(tl, ()):
+                cand = by_layer.get(tl, ())
+                if not cand:
+                    continue
+                start = int(rng.integers(len(cand)))
+                for off in range(len(cand)):
+                    v = cand[(start + off) % len(cand)]
                     if len(out) >= m:
                         break
                     if find(u) == find(v):
