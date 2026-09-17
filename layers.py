@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Hashable
 
 import networkx as nx
@@ -82,6 +82,15 @@ class LayerAssignment:
                 if w not in first or r < first[w]:
                     first[w] = r
         return first
+
+
+def permute_layer_ranks(assignment: LayerAssignment, rng: np.random.Generator) -> LayerAssignment:
+    """
+    Control arm: shuffle the per-edge layer ranks across the edges, preserving the
+    number of edges per rank exactly.
+    """
+    hard = np.asarray(assignment.hard_ranks)
+    return replace(assignment, hard_ranks=hard[rng.permutation(hard.size)])
 
 
 def assign_layers(G: nx.Graph, model: GammaMixture, feature_attr: str = DISTANCE_KEY) -> LayerAssignment:
