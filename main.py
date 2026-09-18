@@ -39,6 +39,9 @@ class PipelineConfig:
     num_directions: int = 50
     #: Grid resolution for Betti-curve comparison and plotting.
     n_grid: int = 512
+    #: Generation seeds.
+    gen_seeds: tuple[int, ...] = (0,)
+    plot_seed_index: int = 0
 
 
 def _write_csv(path: Path, header: list[str], rows: list[list]) -> None:
@@ -77,46 +80,50 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
     original_topology = get_topology(assignment.edges, assignment.distances, nodes, cfg.expansion_dim)
     orig_triangles = sum(nx.triangles(G).values()) // 3
 
-    metrics: dict[tuple[str, str, int, str], float] = {}
+    metrics: dict[tuple[str, str, int, int, str], float] = {}
     gen_report_rows: list[list] = []
     structure_rows: list[list] = []
 
-    # Pass 1: build every surrogate first, so the comparison scale can be shared.
-    built: dict[str, tuple] = {}
+    # Pass 1: build every surrogate first, over every seed, so one cap covers them all.
+    built: dict[tuple[str, int], tuple] = {}
     for gi, gen in enumerate(cfg.generators):
-        rng = np.random.default_rng([cfg.seed, gi])
-        dist_rng = np.random.default_rng([cfg.seed, gi, 1])
+        for si, sd in enumerate(cfg.gen_seeds):
+            rng = np.random.default_rng([cfg.seed, gi, sd])
+            dist_rng = np.random.default_rng([cfg.seed, gi, sd, 1])
 
-        H, report = build_surrogate(G, assignment, gen, rng, model.n_components*2)
-        for entry in report["layers"]:
-            gen_report_rows.append([gen, entry["rank"], entry["target"], entry["generated"], entry["lost"]])
-        assign_surrogate_distances(H, assignment, model, dist_rng, cfg.feature_attr)
-        edges, _ = surrogate_edge_layers(H)
-        _, dists = edge_distances(H, cfg.feature_attr)
-        built[gen] = (H, get_topology(edges, dists, nodes, cfg.expansion_dim), dists)
+            H, report = build_surrogate(G, assignment, gen, rng, model.n_components*2)
+            for entry in report["layers"]:
+                gen_report_rows.append([gen, sd, entry["rank"], entry["target"], entry["generated"], entry["lost"]])
+            assign_surrogate_distances(H, assignment, model, dist_rng, cfg.feature_attr)
+            edges, _ = surrogate_edge_layers(H)
+            _, dists = edge_distances(H, cfg.feature_attr)
+            built[(gen, sd)] = (H, get_topology(edges, dists, nodes, cfg.expansion_dim), dists)
 
     cap = float(max([assignment.distances.max()] + [d.max() for _, _, d in built.values()]))
     x_range = np.linspace(0.0, cap, cfg.n_grid)
     log.info("Shared filtration scale: cap=%.6g over %d grid points.", cap, cfg.n_grid)
 
     # Pass 2: measure and plot everything on that shared scale.
-    for gen, (H, surrogate_topology, _) in built.items():
+    plot_seed = cfg.gen_seeds[cfg.plot_seed_index] if cfg.gen_seeds else None
+    for (gen, sd), (H, surrogate_topology, _) in built.items():
         diffs = diagram_distances(original_topology, surrogate_topology, cap=cap, wasserstein_method=cfg.wasserstein_method, num_directions=cfg.num_directions)
         diffs.update(betti_distances(original_topology, surrogate_topology, x_range))
         for (dim, metric), value in diffs.items():
-            metrics[(record.label, gen, dim, metric)] = float(value)
-        log.info("%s: %s", gen, {f"H{d}-{m}": round(v, 5) for (d, m), v in sorted(diffs.items())})
+            metrics[(record.label, gen, sd, dim, metric)] = float(value)
+        log.info("%s seed=%d: %s", gen, sd, {f"H{d}-{m}": round(v, 5) for (d, m), v in sorted(diffs.items())})
 
         # Structural counts kept out of the distances
         surr_triangles = sum(nx.triangles(H).values()) // 3
         log.info("Triangles orig vs surr: %d vs %d", orig_triangles, surr_triangles)
         structure_rows.append([
-            record.label, gen, G.number_of_nodes(), G.number_of_edges(), H.number_of_edges(),
+            record.label, gen, sd, G.number_of_nodes(), G.number_of_edges(), H.number_of_edges(),
             essential_count(original_topology[0]), essential_count(surrogate_topology[0]),
             essential_count(original_topology[1]), essential_count(surrogate_topology[1]),
             orig_triangles, surr_triangles,
         ])
 
+        if sd != plot_seed:
+            continue
         stem = f"{record.label}_{gen}"
         plot_graphs(G, H, out / f"{gen}_graph.png", model=model)
         plot_topology(original_topology, surrogate_topology, out / f"{gen}_topology.png", x_range)
@@ -124,14 +131,25 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
         #write_graphml(H, out/f"{stem}_surrogate.graphml")
 
     _write_csv(out / "structure.csv",
-               ["dataset", "generator", "n_nodes", "n_edges_orig", "n_edges_surr",
+               ["dataset", "generator", "seed", "n_nodes", "n_edges_orig", "n_edges_surr",
                 "b0_orig", "b0_surr", "b1_orig", "b1_surr", "triangles_orig", "triangles_surr"],
                structure_rows)
 
-    _write_csv(out / "generation_report.csv", ["generator", "rank", "target_edges", "generated_edges", "lost_edges"], gen_report_rows)
+    _write_csv(out / "generation_report.csv", ["generator", "seed", "rank", "target_edges", "generated_edges", "lost_edges"], gen_report_rows)
 
-    summary_rows = [[label, gen, dim, metric, value] for (label, gen, dim, metric), value in sorted(metrics.items(), key=lambda kv: kv[0][1:])]
-    _write_csv(out / "summary.csv", ["dataset", "generator", "dim", "metric", "distance"], summary_rows)
+    summary_rows = [[label, gen, sd, dim, metric, value] for (label, gen, sd, dim, metric), value in sorted(metrics.items(), key=lambda kv: kv[0][1:])]
+    _write_csv(out / "summary.csv", ["dataset", "generator", "seed", "dim", "metric", "distance"], summary_rows)
+
+    # Mean/sd per (generator, dim, metric) over the seeds
+    agg: dict[tuple, list[float]] = {}
+    for (label, gen, sd, dim, metric), value in metrics.items():
+        agg.setdefault((label, gen, dim, metric), []).append(value)
+    summary_agg_rows = [
+        [label, gen, dim, metric, len(v), float(np.mean(v)), float(np.std(v, ddof=1)) if len(v) > 1 else 0.0]
+        for (label, gen, dim, metric), v in sorted(agg.items(), key=lambda kv: kv[0][1:])
+    ]
+    _write_csv(out / "summary_agg.csv",
+               ["dataset", "generator", "dim", "metric", "n_seeds", "mean", "sd"], summary_agg_rows)
 
     return {
         "record": record,
@@ -141,16 +159,19 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
         "diagnostics": diagnostics,
         "original_topology": original_topology,
         "metrics": metrics,
+        "built": built,
+        "cap": cap,
+        "x_range": x_range,
     }
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     cfg = PipelineConfig(
-        input_path="./data/in/ErdosRenyiRicci.graphml",
+        input_path="./data/in/FR_1702188000.3000.graphml",
         output_dir="./data/out",
         n_range=range(1, 9),
-        fixed=1,
+        fixed=None,
         seed=0,
         n_init=5,
     )
