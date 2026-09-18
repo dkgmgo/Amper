@@ -22,7 +22,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from builder import assign_surrogate_distances, build_surrogate, surrogate_edge_layers
-from datasets import load_record
+from datasets import discover_graphs, load_record
 from layers import LayerAssignment, assign_layers, edge_distances, permute_layer_ranks
 from mixture import select_components
 from topology import betti_distances, essential_count, get_topology
@@ -81,7 +81,7 @@ def print_infos(record, a, perm_assignments):
         # the treatment must preserve every per-rank edge count exactly.
         assert Counter(int(r) for r in b.hard_ranks) == real_counts, \
             f"perm seed {ps}: per-rank edge counts changed"
-        # realised relabelling rate, against the 1-sum(p^2) expectation above.
+        # realized relabelling rate, against the 1-sum(p^2) expectation above.
         changed = float(np.mean(np.asarray(a.hard_ranks) != np.asarray(b.hard_ranks)))
         log.info(f"{ps:>6} {'OK':>17} {changed:>12.1%}   {_layer_nodes_sizes(b)}")
 
@@ -102,7 +102,7 @@ def build_arms(record, model, a, perm_assignments) -> tuple[dict, dict, list, np
             asg = perm_assignments[ps]
             for gs in GEN_SEEDS:
                 run = f"{gen}|{arm}|p{ps}|g{gs}"
-                rng = np.random.default_rng([SEED, gi, pi, gs]) #TODO test without pi, gi
+                rng = np.random.default_rng([SEED, gi, pi, gs])
                 dist_rng = np.random.default_rng([SEED, gi, pi, gs, 1])
 
                 H, _ = build_surrogate(G, asg, gen, rng, model.n_components * 2)
@@ -156,7 +156,7 @@ def main(input_path: Path, input_key: str, out_dir: Path) -> None:
             "beta1": essential_count(surrogate_topology[1]),
             "clustering": nx.average_clustering(H),
             "triangles": sum(nx.triangles(H).values()) // 3,
-            "H0_norm": h0 / (cap * n), "H1_norm": h1 / (cap * n),
+            "H0_per_n": h0 / n, "H1_per_n": h1 / n,
         })
 
     target = len(a.edges)
@@ -172,9 +172,8 @@ def main(input_path: Path, input_key: str, out_dir: Path) -> None:
         w.writerows(rows)
     log.info(f"\nWrote {csv_path}  ({len(rows)} runs)")
 
-    cols = ["H0_betti_l1", "H1_betti_l1", "H0_norm", "beta0", "beta1", "clustering", "triangles"]
+    cols = ["H0_betti_l1", "H1_betti_l1", "H0_per_n", "beta0", "beta1", "clustering", "triangles"]
     log.info(f"SUMMARY {input_key} K={a.n_layers} — mean +/- sd over seeds  (cap={cap:.6g}, shared within this run)")
-    log.info(f"  H0_norm = H0_betti_l1 / (cap * n), n={n}")
     log.info(f"original: b0={orig['b0']}  b1={orig['b1']}  C={orig['C']:.4f}  tri={orig['tri']}  edges={orig['edges']}")
 
     summary_rows = []
@@ -190,7 +189,7 @@ def main(input_path: Path, input_key: str, out_dir: Path) -> None:
                 v = np.array([r[c] for r in sel], dtype=float)
                 m = float(v.mean())
                 s = float(v.std(ddof=1)) if len(v) > 1 else 0.0
-                fmt = "{:.5f}" if c in ("clustering", "H0_norm", "H1_norm") else "{:.1f}"
+                fmt = "{:.5f}" if c in ("clustering", "H0_per_n", "H1_per_n") else "{:.1f}"
                 cells.append(f"{fmt.format(m)} +/- {fmt.format(s)}")
                 summary_rows.append({"dataset": record.label, "K": a.n_layers, "generator": gen,
                                      "arm": arm, "metric": c, "mean": m, "sd": s, "n": len(v)})
@@ -207,12 +206,8 @@ def main(input_path: Path, input_key: str, out_dir: Path) -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     
-    graphs = {
-        "FR": "./data/in/FR_1702188000.1500.graphml",
-        "DE": "./data/in/DE_1702188000.751.graphml",
-        "US": "./data/in/US_1702188000.1500.graphml",
-        "IR": "./data/in/IR_1702188000.1500.graphml",
-    }
+    graphs = discover_graphs("./data/in", keys=sys.argv[1:] or None)
+    log.info("Graphs: %s", ", ".join(f"{k} ({v.name})" for k, v in graphs.items()))
 
     for key in graphs:
         out_dir = Path(f"./data/out/perm_control_{key}")   

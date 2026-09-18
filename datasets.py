@@ -133,6 +133,31 @@ def load_record(path: str | Path, feature_attr: str = DISTANCE_KEY) -> GraphReco
     return GraphRecord(path=path, country=country, snapshot=snapshot, graph=load_graph(path, feature_attr=feature_attr))
 
 
+def discover_graphs(data_dir: str | Path = "./data/in", pattern: str = "*.graphml", keys: Iterable[str] | None = None) -> dict[str, Path]:
+    """
+    Graph files sitting **directly** in `data_dir` (not recursive), keyed by the country code parsed from the file name
+    """
+    data_dir = Path(data_dir)
+    out: dict[str, Path] = {}
+    for path in sorted(data_dir.glob(pattern)):
+        if not path.is_file():
+            continue
+        key, snapshot = parse_country_snapshot(path)
+        if key in out:
+            alt = f"{key}_{snapshot}" if snapshot is not None else f"{key}_{len(out)}"
+            log.warning("Duplicate key %s (%s and %s); keeping the second as %s.", key, out[key].name, path.name, alt)
+            key = alt
+        out[key] = path
+    if not out:
+        raise FileNotFoundError(f"No '{pattern}' files directly under {data_dir}")
+    if keys is not None:
+        missing = [k for k in keys if k not in out]
+        if missing:
+            raise KeyError(f"Unknown graph key(s) {missing}; available: {sorted(out)}")
+        out = {k: out[k] for k in keys}
+    return out
+
+
 def iter_graph_files(data_dir: str | Path, ignore_dirs: Iterable[str] = ("processed",), pattern: str = "*.graphml") -> list[Path]:
     """
     List graph files under `data_dir` recursively. Any file whose path contains a directory in `ignore_dirs` is skipped.
