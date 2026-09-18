@@ -168,7 +168,7 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     cfg = PipelineConfig(
-        input_path="./data/in/FR_1702188000.3000.graphml",
+        input_path="./data/in/CN_1702188000.3000.graphml",
         output_dir="./data/out",
         n_range=range(1, 9),
         fixed=None,
